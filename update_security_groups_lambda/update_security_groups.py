@@ -13,13 +13,10 @@ import hashlib
 import json
 import urllib2
 
-# Name of the service, as seen in the ip-groups.json file, to extract information for
-SERVICE = "CLOUDFRONT"
 # Ports your application uses that need inbound permissions from the service for
 INGRESS_PORTS = { 'Http' : 80, 'Https': 443 }
 # Tags which identify the security groups you want to update
-SECURITY_GROUP_TAG_FOR_HTTP = { 'Name': 'cloudfront', 'AutoUpdate': 'true', 'Protocol': 'http' }
-SECURITY_GROUP_TAG_FOR_HTTPS = { 'Name': 'cloudfront', 'AutoUpdate': 'true', 'Protocol': 'https' }
+SECURITY_GROUP_TAG_FOR_UPDATE = { 'UpdateType': 'Lambda', 'AutoUpdate': 'true' }
 
 def lambda_handler(event, context):
     print("Received event: " + json.dumps(event, indent=2))
@@ -28,11 +25,8 @@ def lambda_handler(event, context):
     # Load the ip ranges from the url
     ip_ranges = json.loads(get_ip_groups_json(message['url'], message['md5']))
 
-    # extract the service ranges
-    cf_ranges = get_ranges_for_service(ip_ranges, SERVICE)
-
     # update the security groups
-    result = update_security_groups(cf_ranges)
+    result = update_security_groups(ip_ranges)
 
     return result
 
@@ -51,37 +45,42 @@ def get_ip_groups_json(url, expected_hash):
 
     return ip_json
 
-def get_ranges_for_service(ranges, service):
+def get_ranges_for_service(ranges, service, region):
     service_ranges = list()
     for prefix in ranges['prefixes']:
-        if prefix['service'] == service:
-            print('Found ' + service + ' range: ' + prefix['ip_prefix'])
-            service_ranges.append(prefix['ip_prefix'])
+		if prefix['service'] == service and (prefix['region'] == region or region == "ALL"):
+			print('Found ' + service + ' range: ' + prefix['ip_prefix'])
+			service_ranges.append(prefix['ip_prefix'])
 
     return service_ranges
 
-def update_security_groups(new_ranges):
+def update_security_groups(ip_ranges):
     client = boto3.client('ec2')
 
-    http_group = get_security_groups_for_update(client, SECURITY_GROUP_TAG_FOR_HTTP)
-    https_group = get_security_groups_for_update(client, SECURITY_GROUP_TAG_FOR_HTTPS)
-    print ('Found ' + str(len(http_group)) + ' HttpSecurityGroups to update')
-    print ('Found ' + str(len(https_group)) + ' HttpsSecurityGroups to update')
+    groups = get_security_groups_for_update(client, SECURITY_GROUP_TAG_FOR_UPDATE)
+    print ('Found ' + str(len(groups)) + ' Security Groups to update')
 
     result = list()
-    http_updated = 0
-    https_updated = 0
-    for group in http_group:
-        if update_security_group(client, group, new_ranges, INGRESS_PORTS['Http']):
-            http_updated += 1
-            result.append('Updated ' + group['GroupId'])
-    for group in https_group:
-        if update_security_group(client, group, new_ranges, INGRESS_PORTS['Https']):
-            https_updated += 1
+    groups_updated = 0
+    for group in groups:
+        for tags in group['Tags']:
+            if tags["Key"] == "ServiceType":
+                SERVICE = tags["Value"]
+            elif tags["Key"] == "Region":
+                REGION = tags["Value"]
+            elif tags["Key"] == "Protocol":
+                if tags["Value"] == "http":
+                    PORT = INGRESS_PORTS['Http']
+                elif tags["Value"] == "https":
+                    PORT = INGRESS_PORTS['Https']
+        # extract the service ranges
+        new_ranges = get_ranges_for_service(ip_ranges, SERVICE, REGION)
+
+        if update_security_group(client, group, new_ranges, PORT):
+            groups_updated += 1
             result.append('Updated ' + group['GroupId'])
 
-    result.append('Updated ' + str(http_updated) + ' of ' + str(len(http_group)) + ' HttpSecurityGroups')
-    result.append('Updated ' + str(https_updated) + ' of ' + str(len(https_group)) + ' HttpsSecurityGroups')
+    result.append('Updated ' + str(groups_updated) + ' of ' + str(len(groups)) + ' Security Groups')
 
     return result
 
