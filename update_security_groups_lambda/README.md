@@ -1,12 +1,18 @@
 # update-security-groups
 
-A Lambda function for updating the **cloudfront** EC2 security group ingress rules
-with the CloudFront IP range changes.
+A Lambda function for updating the **tagged** EC2 security group ingress rules
+with the defined AWS service IP range changes.
 
 
 ## Security Group
 
-This Lambda function updates EC2 security groups tagged with `Name: cloudfront` and `AutoUpdate: true` and a `Protocol` tag with value `http` or `https`.
+This Lambda function updates EC2 security groups tagged with:
+
+- `UpdateType:` tag with `Lambda`
+- `AutoUpdate:` tag with `true` to enable or `false` to disable
+- `Protocol: ` tag with value `http` or `https`
+- `ServiceType:` tag with `AMAZON` or `CLOUDFRONT` or `EC2` or `ROUTE53` or `ROUTE53_HEALTHCHECKS`
+- `Region:` tag with `ALL` for addresses on all regions including GLOBAL or the AWS region used on [AWS IP Address Ranges on JSON format](https://ip-ranges.amazonaws.com/ip-ranges.json)
 
 
 ## Event Source
